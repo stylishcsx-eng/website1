@@ -33,7 +33,7 @@ security = HTTPBearer(auto_error=False)
 # CS 1.6 Server Config
 CS_SERVER_IP = "82.22.174.126"
 CS_SERVER_PORT = 27016
-CS_SERVER_NAME = "shadowzm: Zombie reverse"
+CS_SERVER_NAME = "ShadowZM : Zombie Reverse"
 
 # Webhook secret for ban sync
 BAN_WEBHOOK_SECRET = os.environ.get('BAN_WEBHOOK_SECRET', 'shadowzm-ban-secret-2024')
