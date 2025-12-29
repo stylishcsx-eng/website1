@@ -115,7 +115,8 @@ class AdminApplicationUpdate(BaseModel):
 
 class NotificationResponse(BaseModel):
     id: str
-    user_id: str
+    steamid: Optional[str] = None
+    nickname: Optional[str] = None
     message: str
     type: str
     read: bool
