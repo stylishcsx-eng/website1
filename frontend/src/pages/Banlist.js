@@ -13,6 +13,9 @@ export const Banlist = () => {
 
   useEffect(() => {
     fetchBans();
+    // Refresh every 30 seconds for real-time updates
+    const interval = setInterval(fetchBans, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchBans = async () => {
@@ -30,6 +33,54 @@ export const Banlist = () => {
     ban.player_nickname.toLowerCase().includes(search.toLowerCase()) ||
     ban.steamid.toLowerCase().includes(search.toLowerCase())
   );
+
+  // Calculate expiry date based on duration
+  const getExpiryDate = (banDate, duration) => {
+    if (duration === 'Permanent' || duration.toLowerCase().includes('permanent')) {
+      return 'Never';
+    }
+    
+    // Parse duration (e.g., "30 days", "7 days", "60 min")
+    const match = duration.match(/(\d+)\s*(min|hour|day|week|month|year)/i);
+    if (!match) return duration;
+    
+    const amount = parseInt(match[1]);
+    const unit = match[2].toLowerCase();
+    
+    const banDateTime = new Date(banDate);
+    let expiryDate = new Date(banDateTime);
+    
+    switch (unit) {
+      case 'min':
+        expiryDate.setMinutes(expiryDate.getMinutes() + amount);
+        break;
+      case 'hour':
+        expiryDate.setHours(expiryDate.getHours() + amount);
+        break;
+      case 'day':
+      case 'days':
+        expiryDate.setDate(expiryDate.getDate() + amount);
+        break;
+      case 'week':
+        expiryDate.setDate(expiryDate.getDate() + (amount * 7));
+        break;
+      case 'month':
+        expiryDate.setMonth(expiryDate.getMonth() + amount);
+        break;
+      case 'year':
+        expiryDate.setFullYear(expiryDate.getFullYear() + amount);
+        break;
+      default:
+        return duration;
+    }
+    
+    // Check if already expired
+    if (expiryDate < new Date()) {
+      return 'Expired';
+    }
+    
+    return format(expiryDate, 'MMM dd, yyyy HH:mm');
+  };
 
   if (loading) {
     return (
@@ -54,6 +105,7 @@ export const Banlist = () => {
             </h1>
           </div>
           <p className="text-muted-foreground">Players banned from shadowzm: Zombie reverse</p>
+          <p className="text-xs text-muted-foreground mt-1">Auto-refreshes every 30 seconds</p>
         </div>
 
         {/* Search */}
@@ -90,11 +142,9 @@ export const Banlist = () => {
                   <tr>
                     <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Player</th>
                     <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">SteamID</th>
-                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">IP</th>
                     <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Reason</th>
-                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Admin</th>
-                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Duration</th>
-                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Banned On</th>
+                    <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Expires</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -102,20 +152,20 @@ export const Banlist = () => {
                     <tr key={ban.id} className="hover:bg-red-900/5 transition-colors" data-testid="ban-row">
                       <td className="px-6 py-4 font-heading font-bold text-white">{ban.player_nickname}</td>
                       <td className="px-6 py-4 font-mono text-xs text-primary">{ban.steamid}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-muted-foreground">{ban.ip}</td>
                       <td className="px-6 py-4 text-sm text-foreground">{ban.reason}</td>
-                      <td className="px-6 py-4 font-mono text-sm text-muted-foreground">{ban.admin_name}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
+                        {format(new Date(ban.ban_date), 'MMM dd, yyyy HH:mm')}
+                      </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 text-xs font-heading uppercase ${
-                          ban.duration === 'Permanent' 
+                          ban.duration === 'Permanent' || ban.duration.toLowerCase().includes('permanent')
                             ? 'bg-red-900/30 text-red-500 border border-red-500/50' 
+                            : getExpiryDate(ban.ban_date, ban.duration) === 'Expired'
+                            ? 'bg-green-900/30 text-green-500 border border-green-500/50'
                             : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/50'
                         }`}>
-                          {ban.duration}
+                          {getExpiryDate(ban.ban_date, ban.duration)}
                         </span>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
-                        {format(new Date(ban.ban_date), 'MMM dd, yyyy')}
                       </td>
                     </tr>
                   ))}
