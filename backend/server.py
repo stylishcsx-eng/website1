@@ -349,11 +349,87 @@ async def delete_ban(ban_id: str, user = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Ban not found")
     return {"message": "Ban removed"}
 
+class BanUpdate(BaseModel):
+    player_nickname: Optional[str] = None
+    steamid: Optional[str] = None
+    reason: Optional[str] = None
+    duration: Optional[str] = None
+
+@api_router.patch("/bans/{ban_id}")
+async def update_ban(ban_id: str, data: BanUpdate, user = Depends(require_admin)):
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    result = await db.bans.find_one_and_update(
+        {"id": ban_id},
+        {"$set": update_data},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Ban not found")
+    result.pop("_id", None)
+    return result
+
 @api_router.delete("/bans/clear/demo")
 async def clear_demo_bans(user = Depends(require_admin)):
     """Clear all demo bans"""
     result = await db.bans.delete_many({})
     return {"message": f"Cleared {result.deleted_count} bans"}
+
+# ==================== OWNER: ADMIN USER MANAGEMENT ====================
+
+class CreateAdminUser(BaseModel):
+    nickname: str
+    email: EmailStr
+    password: str
+    steamid: Optional[str] = None
+
+@api_router.post("/owner/create-admin")
+async def create_admin_user(data: CreateAdminUser, user = Depends(require_owner)):
+    """Owner can create new admin users"""
+    existing = await db.users.find_one({"$or": [{"email": data.email}, {"nickname": data.nickname}]})
+    if existing:
+        raise HTTPException(status_code=400, detail="User with this email or nickname already exists")
+    
+    new_admin = {
+        "id": str(uuid.uuid4()),
+        "nickname": data.nickname,
+        "email": data.email,
+        "password": hash_password(data.password),
+        "steamid": data.steamid,
+        "role": "admin",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(new_admin)
+    return {"message": f"Admin user '{data.nickname}' created successfully"}
+
+@api_router.delete("/owner/delete-admin/{user_id}")
+async def delete_admin_user(user_id: str, user = Depends(require_owner)):
+    """Owner can delete admin users"""
+    target_user = await db.users.find_one({"id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.get("role") == "owner":
+        raise HTTPException(status_code=403, detail="Cannot delete owner account")
+    
+    await db.users.delete_one({"id": user_id})
+    return {"message": "Admin user deleted"}
+
+@api_router.patch("/owner/update-role/{user_id}")
+async def update_user_role(user_id: str, role: str, user = Depends(require_owner)):
+    """Owner can change user roles"""
+    if role not in ["player", "admin"]:
+        raise HTTPException(status_code=400, detail="Invalid role. Use 'player' or 'admin'")
+    
+    target_user = await db.users.find_one({"id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.get("role") == "owner":
+        raise HTTPException(status_code=403, detail="Cannot change owner role")
+    
+    await db.users.update_one({"id": user_id}, {"$set": {"role": role}})
+    return {"message": f"User role updated to {role}"}
 
 # ==================== PLAYERS / RANKINGS ROUTES ====================
 
