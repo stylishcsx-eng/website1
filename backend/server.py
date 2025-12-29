@@ -710,7 +710,7 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup():
     await init_default_admin()
-    await seed_demo_data()
+    # Demo data seeding removed - only real data from your server
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
