@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
-# Auto Ban Sync Script for shadowzm
-# Watches AMX Mod X logs and sends bans to website
+# Auto Ban Sync for Advanced Bans Plugin
+# Watches BAN_HISTORY logs and syncs to website
 # ============================================
 
 # Configuration
@@ -9,10 +9,11 @@ WEBSITE_URL="http://82.22.174.126:8085"
 SECRET="shadowzm-ban-secret-2024"
 LOG_DIR="/var/lib/pterodactyl/volumes/d968fb39-3234-47f5-9341-d3149d0c8739/cstrike/addons/amxmodx/logs"
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${GREEN}=== shadowzm Auto Ban Sync ===${NC}"
@@ -28,7 +29,7 @@ send_ban() {
     local admin="$4"
     local duration="$5"
     
-    echo -e "${YELLOW}[BAN DETECTED]${NC}"
+    echo -e "${YELLOW}[NEW BAN DETECTED]${NC}"
     echo "  Player: $player"
     echo "  SteamID: $steamid"
     echo "  Reason: $reason"
@@ -49,16 +50,29 @@ send_ban() {
     if echo "$response" | grep -q "message"; then
         echo -e "${GREEN}  ✓ Synced to website${NC}"
     else
-        echo -e "${RED}  ✗ Failed to sync: $response${NC}"
+        echo -e "${RED}  ✗ Failed: $response${NC}"
     fi
     echo ""
 }
 
-# Check if inotifywait is available
-if ! command -v inotifywait &> /dev/null; then
-    echo -e "${RED}Error: inotifywait not found. Install with: apt install inotify-tools${NC}"
-    exit 1
-fi
+# Function to remove ban from website (when unbanned)
+remove_ban() {
+    local steamid="$1"
+    local player="$2"
+    
+    echo -e "${CYAN}[UNBAN DETECTED]${NC}"
+    echo "  Player: $player"
+    echo "  SteamID: $steamid"
+    
+    response=$(curl -s -X DELETE "$WEBSITE_URL/api/bans/webhook/$steamid?secret=$SECRET")
+    
+    if echo "$response" | grep -q "message"; then
+        echo -e "${GREEN}  ✓ Removed from website${NC}"
+    else
+        echo -e "${YELLOW}  Note: $response${NC}"
+    fi
+    echo ""
+}
 
 # Check if log directory exists
 if [ ! -d "$LOG_DIR" ]; then
@@ -66,30 +80,63 @@ if [ ! -d "$LOG_DIR" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}Watching for ban events...${NC}"
+echo -e "${GREEN}Watching for ban events in BAN_HISTORY logs...${NC}"
 echo "(Press Ctrl+C to stop)"
 echo ""
 
-# Watch log files for ban patterns
-# AMX Mod X typically logs bans like: 
-# [ADMIN] "AdminName" banned "PlayerName" (STEAM_0:1:12345) reason: "Cheating" duration: "Permanent"
-
-tail -F "$LOG_DIR"/*.log 2>/dev/null | while read line; do
-    # Pattern 1: AMX Ban style
-    if echo "$line" | grep -qi "banned"; then
-        # Try to extract info from common ban patterns
+# Watch BAN_HISTORY log files
+tail -F "$LOG_DIR"/BAN_HISTORY_*.log 2>/dev/null | while read line; do
+    
+    # Check for new ban
+    # Format: L 12/29/2025 - 19:11:07: AdminName <ADMIN_STEAM> banned PlayerName <PLAYER_STEAM> || Reason: "reason" || Ban Length: duration
+    if echo "$line" | grep -q "banned.*||.*Reason:.*||.*Ban Length:"; then
         
-        # Pattern: Ban: "Player" (STEAM_X:X:X) by "Admin" - Reason - Duration
-        if [[ "$line" =~ [Bb]an.*\"([^\"]+)\".*\(([^)]+)\).*by.*\"([^\"]+)\".*-[[:space:]]*(.+)[[:space:]]*-[[:space:]]*(.+) ]]; then
-            send_ban "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[5]}"
+        # Extract admin name (before <)
+        admin=$(echo "$line" | sed -n 's/.*: \([^<]*\) <[^>]*> banned.*/\1/p' | xargs)
         
-        # Pattern: "Admin" banned "Player" (STEAM_X:X:X) reason: "X" duration: "X"
-        elif [[ "$line" =~ \"([^\"]+)\"[[:space:]]*banned[[:space:]]*\"([^\"]+)\"[[:space:]]*\(([^)]+)\).*reason:[[:space:]]*\"([^\"]+)\".*duration:[[:space:]]*\"([^\"]+)\" ]]; then
-            send_ban "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[1]}" "${BASH_REMATCH[5]}"
+        # Extract player name (after "banned " and before <)
+        player=$(echo "$line" | sed -n 's/.*banned \([^<]*\) <.*/\1/p' | xargs)
         
-        # Pattern: Simple - Player STEAM_X:X:X banned
-        elif [[ "$line" =~ ([^[:space:]]+)[[:space:]]*(STEAM_[0-9]:[0-9]:[0-9]+)[[:space:]]*banned ]]; then
-            send_ban "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "Banned from server" "Server" "Permanent"
+        # Extract player steamid (inside < > after "banned PlayerName")
+        steamid=$(echo "$line" | sed -n 's/.*banned [^<]* <\([^>]*\)>.*/\1/p')
+        
+        # Extract reason (inside quotes after "Reason:")
+        reason=$(echo "$line" | sed -n 's/.*Reason: "\([^"]*\)".*/\1/p')
+        
+        # Extract duration (after "Ban Length:")
+        duration=$(echo "$line" | sed -n 's/.*Ban Length: \(.*\)/\1/p')
+        
+        # If we got all the data, send it
+        if [ -n "$player" ] && [ -n "$steamid" ]; then
+            # Default values if empty
+            [ -z "$reason" ] && reason="Banned"
+            [ -z "$admin" ] && admin="Server"
+            [ -z "$duration" ] && duration="Permanent"
+            
+            send_ban "$player" "$steamid" "$reason" "$admin" "$duration"
         fi
     fi
+    
+    # Check for unban
+    # Format: ... unbanned PlayerName <STEAMID> ...
+    if echo "$line" | grep -q "unbanned"; then
+        player=$(echo "$line" | sed -n 's/.*unbanned \([^<]*\) <.*/\1/p' | xargs)
+        steamid=$(echo "$line" | sed -n 's/.*unbanned [^<]* <\([^>]*\)>.*/\1/p')
+        
+        if [ -n "$steamid" ]; then
+            remove_ban "$steamid" "$player"
+        fi
+    fi
+    
+    # Check for ban expiry
+    # Format: Ban time is up for: PlayerName [STEAMID]
+    if echo "$line" | grep -q "Ban time is up"; then
+        player=$(echo "$line" | sed -n 's/.*Ban time is up for: \([^[]*\) \[.*/\1/p' | xargs)
+        steamid=$(echo "$line" | sed -n 's/.*\[\([^\]]*\)\].*/\1/p')
+        
+        if [ -n "$steamid" ]; then
+            remove_ban "$steamid" "$player"
+        fi
+    fi
+    
 done
