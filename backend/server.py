@@ -207,7 +207,7 @@ async def query_cs_server():
             "current_map": info.map_name or "de_dust2",
             "players_online": info.player_count,
             "max_players": info.max_players,
-            "ping": info.ping if hasattr(info, 'ping') else 0,
+            "ping": int(info.ping * 1000) if hasattr(info, 'ping') else 0,
             "players": player_list
         }
     except Exception as e:
