@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { Send, CheckCircle, Shield, AlertTriangle } from 'lucide-react';
+import { Send, CheckCircle, Shield, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 export const ApplyAdmin = () => {
+  const { user, isAdmin } = useAuth();
   const [formData, setFormData] = useState({
     nickname: '',
     steamid: '',
@@ -41,6 +43,28 @@ export const ApplyAdmin = () => {
       setLoading(false);
     }
   };
+
+  // Show message if user is already an admin
+  if (isAdmin) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-6 pt-20">
+        <div className="text-center max-w-md">
+          <div className="w-24 h-24 bg-primary/20 border border-primary flex items-center justify-center mx-auto mb-6">
+            <ShieldCheck className="w-12 h-12 text-primary" />
+          </div>
+          <h1 className="font-heading text-4xl font-bold uppercase text-white mb-4">
+            YOU'RE ALREADY AN ADMIN
+          </h1>
+          <p className="text-muted-foreground mb-4">
+            You already have {user?.role === 'owner' ? 'Owner' : 'Admin'} privileges on ShadowZM : Zombie Reverse.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            This page is for players who want to apply for admin status.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
