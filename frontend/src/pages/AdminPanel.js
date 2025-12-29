@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Users, Ban, FileText, Check, X, Trash2, Shield, RefreshCw, Database, Calendar, AlertTriangle } from 'lucide-react';
+import { Users, Ban, FileText, Check, X, Trash2, Shield, RefreshCw, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -13,12 +13,9 @@ export const AdminPanel = () => {
   const [users, setUsers] = useState([]);
   const [bans, setBans] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [amxbansStatus, setAmxbansStatus] = useState(null);
-  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchData();
-    checkAmxbansStatus();
   }, [activeTab]);
 
   const fetchData = async () => {
@@ -39,28 +36,6 @@ export const AdminPanel = () => {
       console.error(error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const checkAmxbansStatus = async () => {
-    try {
-      const response = await axios.get(`${API}/bans/amxbans-status`);
-      setAmxbansStatus(response.data);
-    } catch (error) {
-      setAmxbansStatus({ connected: false, error: 'Failed to check status' });
-    }
-  };
-
-  const syncAmxbans = async () => {
-    setSyncing(true);
-    try {
-      await axios.post(`${API}/bans/sync-amxbans`);
-      toast.success('AMXBans synced successfully!');
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to sync AMXBans');
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -131,30 +106,6 @@ export const AdminPanel = () => {
           >
             <RefreshCw className="w-4 h-4" />
             <span className="font-heading uppercase text-sm tracking-widest hidden sm:inline">Refresh</span>
-          </button>
-        </div>
-
-        {/* AMXBans Status Card */}
-        <div className="mb-6 p-4 bg-card/50 border border-white/10 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <Database className={`w-6 h-6 ${amxbansStatus?.connected ? 'text-green-500' : 'text-red-500'}`} />
-            <div>
-              <p className="font-heading text-sm uppercase tracking-widest text-white">AMXBans Database</p>
-              <p className="text-xs text-muted-foreground">
-                {amxbansStatus?.connected 
-                  ? `Connected to ${amxbansStatus.host}/${amxbansStatus.database}` 
-                  : amxbansStatus?.error || 'Not connected'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={syncAmxbans}
-            disabled={syncing || !amxbansStatus?.connected}
-            data-testid="btn-sync-amxbans"
-            className="flex items-center space-x-2 px-4 py-2 bg-primary/20 border border-primary text-primary hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            <span className="font-heading uppercase text-sm tracking-widest">Sync Bans</span>
           </button>
         </div>
 
@@ -354,7 +305,6 @@ export const AdminPanel = () => {
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">SteamID</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Reason</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Duration</th>
-                        <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Source</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
@@ -365,14 +315,6 @@ export const AdminPanel = () => {
                           <td className="px-6 py-4 font-mono text-xs text-primary">{ban.steamid}</td>
                           <td className="px-6 py-4 text-sm text-foreground">{ban.reason}</td>
                           <td className="px-6 py-4 font-mono text-sm text-muted-foreground">{ban.duration}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2 py-1 text-xs font-heading uppercase ${
-                              ban.source === 'amxbans' ? 'bg-blue-900/20 text-blue-500 border border-blue-500/50' :
-                              'bg-muted text-muted-foreground'
-                            }`}>
-                              {ban.source || 'manual'}
-                            </span>
-                          </td>
                           <td className="px-6 py-4">
                             <button
                               onClick={() => handleDeleteBan(ban.id)}
