@@ -428,19 +428,25 @@ async def get_players(search: Optional[str] = None):
     players = await db.players.find(query, {"_id": 0}).sort("kills", -1).to_list(100)
     return players
 
-@api_router.get("/players/{steamid}", response_model=PlayerResponse)
-async def get_player(steamid: str):
-    player = await db.players.find_one({"steamid": steamid}, {"_id": 0})
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-    return player
-
 @api_router.get("/rankings/top", response_model=List[PlayerResponse])
 async def get_top_players(limit: int = 15):
     players = await db.players.find({}, {"_id": 0}).sort("kills", -1).to_list(limit)
     for i, p in enumerate(players):
         p["rank"] = i + 1
     return players
+
+# Clear route MUST be before parameterized routes
+@api_router.delete("/players/clear/all")
+async def clear_all_players(user = Depends(require_admin)):
+    result = await db.players.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} players"}
+
+@api_router.get("/players/{steamid}", response_model=PlayerResponse)
+async def get_player(steamid: str):
+    player = await db.players.find_one({"steamid": steamid}, {"_id": 0})
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return player
 
 # ==================== PLAYER STATS WEBHOOK ====================
 
@@ -481,11 +487,6 @@ async def receive_player_stats_webhook(data: PlayerStatsWebhookData):
         player_data["rank"] = 0
         await db.players.insert_one(player_data)
         return {"message": "Player added", "steamid": data.steamid}
-
-@api_router.delete("/players/clear/all")
-async def clear_all_players(user = Depends(require_admin)):
-    result = await db.players.delete_many({})
-    return {"message": f"Cleared {result.deleted_count} players"}
 
 # ==================== ADMIN APPLICATIONS ROUTES ====================
 
