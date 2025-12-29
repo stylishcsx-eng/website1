@@ -39,9 +39,9 @@ CS_SERVER_NAME = "shadowzm: Zombie reverse"
 # AMXBans MySQL Config (set via environment or defaults)
 AMXBANS_HOST = os.environ.get('AMXBANS_HOST', '82.22.174.126')
 AMXBANS_PORT = int(os.environ.get('AMXBANS_PORT', '3306'))
-AMXBANS_DB = os.environ.get('AMXBANS_DB', 'bans')
-AMXBANS_USER = os.environ.get('AMXBANS_USER', 'Stylish')
-AMXBANS_PASS = os.environ.get('AMXBANS_PASS', 'Itachi1849')
+AMXBANS_DB = os.environ.get('AMXBANS_DB', 'amx')
+AMXBANS_USER = os.environ.get('AMXBANS_USER', 'root')
+AMXBANS_PASS = os.environ.get('AMXBANS_PASS', '')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
