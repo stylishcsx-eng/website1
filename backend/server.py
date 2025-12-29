@@ -14,6 +14,7 @@ import jwt
 from passlib.context import CryptContext
 import a2s
 import asyncio
+import aiomysql
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -34,6 +35,13 @@ security = HTTPBearer(auto_error=False)
 CS_SERVER_IP = "82.22.174.126"
 CS_SERVER_PORT = 27016
 CS_SERVER_NAME = "shadowzm: Zombie reverse"
+
+# AMXBans MySQL Config (set via environment or defaults)
+AMXBANS_HOST = os.environ.get('AMXBANS_HOST', '82.22.174.126')
+AMXBANS_PORT = int(os.environ.get('AMXBANS_PORT', '3306'))
+AMXBANS_DB = os.environ.get('AMXBANS_DB', 'bans')
+AMXBANS_USER = os.environ.get('AMXBANS_USER', 'Stylish')
+AMXBANS_PASS = os.environ.get('AMXBANS_PASS', 'Itachi1849')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -104,6 +112,14 @@ class AdminApplicationResponse(BaseModel):
 
 class AdminApplicationUpdate(BaseModel):
     status: str
+
+class NotificationResponse(BaseModel):
+    id: str
+    user_id: str
+    message: str
+    type: str
+    read: bool
+    created_at: str
 
 class PlayerResponse(BaseModel):
     id: str
@@ -360,12 +376,14 @@ async def get_admin_applications(user = Depends(require_admin)):
 
 @api_router.post("/admin-applications", response_model=AdminApplicationResponse)
 async def create_admin_application(data: AdminApplicationCreate):
-    existing = await db.admin_applications.find_one({
+    # Check if user has applied in the last 30 days
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    recent_app = await db.admin_applications.find_one({
         "steamid": data.steamid,
-        "status": "pending"
+        "submitted_at": {"$gte": thirty_days_ago}
     })
-    if existing:
-        raise HTTPException(status_code=400, detail="You already have a pending application")
+    if recent_app:
+        raise HTTPException(status_code=400, detail="You can only apply once per month. Please wait before reapplying.")
     
     app = {
         "id": str(uuid.uuid4()),
@@ -378,15 +396,68 @@ async def create_admin_application(data: AdminApplicationCreate):
 
 @api_router.patch("/admin-applications/{app_id}", response_model=AdminApplicationResponse)
 async def update_admin_application(app_id: str, data: AdminApplicationUpdate, user = Depends(require_admin)):
+    application = await db.admin_applications.find_one({"id": app_id})
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
     result = await db.admin_applications.find_one_and_update(
         {"id": app_id},
         {"$set": {"status": data.status}},
         return_document=True
     )
-    if not result:
-        raise HTTPException(status_code=404, detail="Application not found")
     result.pop("_id", None)
+    
+    # Create notification for the applicant
+    notification = {
+        "id": str(uuid.uuid4()),
+        "steamid": application["steamid"],
+        "nickname": application["nickname"],
+        "message": f"Your admin application has been {data.status}!" if data.status in ["approved", "rejected"] else f"Application status: {data.status}",
+        "type": "application_" + data.status,
+        "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.notifications.insert_one(notification)
+    
     return result
+
+@api_router.delete("/admin-applications/{app_id}")
+async def delete_admin_application(app_id: str, user = Depends(require_admin)):
+    result = await db.admin_applications.delete_one({"id": app_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return {"message": "Application deleted"}
+
+@api_router.delete("/admin-applications/bulk/old")
+async def delete_old_applications(user = Depends(require_admin)):
+    """Delete all applications older than 30 days"""
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    result = await db.admin_applications.delete_many({
+        "submitted_at": {"$lt": thirty_days_ago}
+    })
+    return {"message": f"Deleted {result.deleted_count} old applications"}
+
+# ==================== NOTIFICATIONS ====================
+
+@api_router.get("/notifications", response_model=List[NotificationResponse])
+async def get_notifications(steamid: Optional[str] = None, nickname: Optional[str] = None):
+    query = {}
+    if steamid:
+        query["steamid"] = steamid
+    if nickname:
+        query["nickname"] = nickname
+    notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return notifications
+
+@api_router.patch("/notifications/{notif_id}/read")
+async def mark_notification_read(notif_id: str):
+    await db.notifications.update_one({"id": notif_id}, {"$set": {"read": True}})
+    return {"message": "Notification marked as read"}
+
+@api_router.delete("/notifications/{notif_id}")
+async def delete_notification(notif_id: str):
+    await db.notifications.delete_one({"id": notif_id})
+    return {"message": "Notification deleted"}
 
 # ==================== ADMIN ROUTES ====================
 
