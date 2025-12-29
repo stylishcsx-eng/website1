@@ -187,17 +187,31 @@ async def require_auth(user = Depends(get_current_user)):
     return user
 
 async def require_admin(user = Depends(require_auth)):
-    if user.get("role") != "admin":
+    if user.get("role") not in ["admin", "owner"]:
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+async def require_owner(user = Depends(require_auth)):
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
     return user
 
 # ==================== INIT DEFAULT ADMIN ====================
 
 async def init_default_admin():
-    admin = await db.users.find_one({"role": "admin"})
-    if not admin:
-        admin_user = {
+    owner = await db.users.find_one({"role": "owner"})
+    if not owner:
+        owner_user = {
             "id": str(uuid.uuid4()),
+            "nickname": "Stylish",
+            "email": "owner@shadowzm.com",
+            "password": hash_password("Itachi1849"),
+            "steamid": "STEAM_0:0:000000",
+            "role": "owner",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.users.insert_one(owner_user)
+        logging.info("Default owner created: Stylish")
             "nickname": "Stylish",
             "email": "admin@shadowzm.com",
             "password": hash_password("Itachi1849"),
