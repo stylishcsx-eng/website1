@@ -140,6 +140,7 @@ export const AuthProvider = ({ children }) => {
       register,
       logout,
       isAdmin,
+      isOwner,
       isAuthenticated: !!user,
       notifications,
       unreadCount,
