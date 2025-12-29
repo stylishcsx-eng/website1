@@ -463,6 +463,50 @@ async def delete_notification(notif_id: str):
     await db.notifications.delete_one({"id": notif_id})
     return {"message": "Notification deleted"}
 
+# ==================== BAN WEBHOOK (Simple Solution) ====================
+
+class BanWebhookData(BaseModel):
+    secret: str
+    player_nickname: str
+    steamid: str
+    reason: str
+    admin_name: str
+    duration: str  # e.g., "Permanent", "30 days", "7 days"
+
+@api_router.post("/bans/webhook")
+async def receive_ban_webhook(data: BanWebhookData):
+    """Receive ban from game server webhook - no IP stored"""
+    if data.secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    
+    # Check if ban already exists
+    existing = await db.bans.find_one({"steamid": data.steamid, "reason": data.reason})
+    if existing:
+        return {"message": "Ban already exists", "id": existing["id"]}
+    
+    ban = {
+        "id": str(uuid.uuid4()),
+        "player_nickname": data.player_nickname,
+        "steamid": data.steamid,
+        "ip": "Hidden",  # Don't store IP
+        "reason": data.reason,
+        "admin_name": data.admin_name,
+        "duration": data.duration,
+        "ban_date": datetime.now(timezone.utc).isoformat(),
+        "source": "server"
+    }
+    await db.bans.insert_one(ban)
+    return {"message": "Ban added", "id": ban["id"]}
+
+@api_router.delete("/bans/webhook/{steamid}")
+async def remove_ban_webhook(steamid: str, secret: str):
+    """Remove ban via webhook (for unbans)"""
+    if secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    
+    result = await db.bans.delete_many({"steamid": steamid})
+    return {"message": f"Removed {result.deleted_count} ban(s)"}
+
 # ==================== AMXBANS LIVE SYNC ====================
 
 async def fetch_amxbans():
