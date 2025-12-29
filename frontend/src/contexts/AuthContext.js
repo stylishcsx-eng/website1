@@ -121,7 +121,8 @@ export const AuthProvider = ({ children }) => {
     setUnreadCount(0);
   };
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+  const isOwner = user?.role === 'owner';
 
   const refreshNotifications = () => {
     if (user?.steamid || user?.nickname) {
