@@ -344,6 +344,12 @@ async def delete_ban(ban_id: str, user = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Ban not found")
     return {"message": "Ban removed"}
 
+@api_router.delete("/bans/clear/demo")
+async def clear_demo_bans(user = Depends(require_admin)):
+    """Clear all demo bans"""
+    result = await db.bans.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} bans"}
+
 # ==================== PLAYERS / RANKINGS ROUTES ====================
 
 @api_router.get("/players", response_model=List[PlayerResponse])
