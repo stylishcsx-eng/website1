@@ -459,6 +459,82 @@ async def delete_notification(notif_id: str):
     await db.notifications.delete_one({"id": notif_id})
     return {"message": "Notification deleted"}
 
+# ==================== AMXBANS LIVE SYNC ====================
+
+async def fetch_amxbans():
+    """Fetch bans from AMXBans MySQL database"""
+    try:
+        conn = await aiomysql.connect(
+            host=AMXBANS_HOST,
+            port=AMXBANS_PORT,
+            user=AMXBANS_USER,
+            password=AMXBANS_PASS,
+            db=AMXBANS_DB
+        )
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT player_nick, player_id, player_ip, ban_reason, admin_nick, ban_length, ban_created 
+                FROM amx_bans 
+                WHERE expired = 0 OR ban_length = 0
+                ORDER BY ban_created DESC
+                LIMIT 100
+            """)
+            bans = await cur.fetchall()
+        conn.close()
+        return bans
+    except Exception as e:
+        logging.warning(f"Failed to fetch AMXBans: {e}")
+        return None
+
+async def sync_amxbans_to_db():
+    """Sync AMXBans to local MongoDB"""
+    amx_bans = await fetch_amxbans()
+    if amx_bans is None:
+        return False
+    
+    for ban in amx_bans:
+        existing = await db.bans.find_one({"steamid": ban.get("player_id", ""), "source": "amxbans"})
+        if not existing:
+            duration = "Permanent" if ban.get("ban_length", 0) == 0 else f"{ban.get('ban_length', 0)} min"
+            new_ban = {
+                "id": str(uuid.uuid4()),
+                "player_nickname": ban.get("player_nick", "Unknown"),
+                "steamid": ban.get("player_id", ""),
+                "ip": ban.get("player_ip", ""),
+                "reason": ban.get("ban_reason", "No reason"),
+                "admin_name": ban.get("admin_nick", "Server"),
+                "duration": duration,
+                "ban_date": datetime.fromtimestamp(ban.get("ban_created", 0), tz=timezone.utc).isoformat() if ban.get("ban_created") else datetime.now(timezone.utc).isoformat(),
+                "source": "amxbans"
+            }
+            await db.bans.insert_one(new_ban)
+    return True
+
+@api_router.post("/bans/sync-amxbans")
+async def sync_amxbans(user = Depends(require_admin)):
+    """Manually sync bans from AMXBans database"""
+    success = await sync_amxbans_to_db()
+    if success:
+        return {"message": "AMXBans synced successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to connect to AMXBans database. Check MySQL credentials.")
+
+@api_router.get("/bans/amxbans-status")
+async def check_amxbans_status():
+    """Check if AMXBans connection is working"""
+    try:
+        conn = await aiomysql.connect(
+            host=AMXBANS_HOST,
+            port=AMXBANS_PORT,
+            user=AMXBANS_USER,
+            password=AMXBANS_PASS,
+            db=AMXBANS_DB
+        )
+        conn.close()
+        return {"connected": True, "host": AMXBANS_HOST, "database": AMXBANS_DB}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
 # ==================== ADMIN ROUTES ====================
 
 @api_router.get("/admin/users", response_model=List[UserResponse])
