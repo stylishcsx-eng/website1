@@ -283,7 +283,7 @@ async def login(data: UserLogin):
 
 @api_router.post("/auth/admin-login", response_model=TokenResponse)
 async def admin_login(data: AdminLogin):
-    user = await db.users.find_one({"nickname": data.username, "role": "admin"}, {"_id": 0})
+    user = await db.users.find_one({"nickname": data.username, "role": {"$in": ["admin", "owner"]}}, {"_id": 0})
     if not user or not verify_password(data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
     
