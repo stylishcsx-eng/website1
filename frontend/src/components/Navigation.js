@@ -32,12 +32,14 @@ export const Navigation = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-3 group" data-testid="nav-logo">
-            <div className="w-10 h-10 bg-primary/20 border border-primary flex items-center justify-center group-hover:bg-primary/30 transition-colors">
-              <Shield className="w-6 h-6 text-primary" />
-            </div>
+            <img 
+              src="/logo.png" 
+              alt="ShadowZM Logo" 
+              className="w-12 h-12 object-contain group-hover:scale-105 transition-transform"
+            />
             <div className="hidden sm:block">
-              <span className="font-heading text-xl font-bold uppercase tracking-wider text-white">shadowzm</span>
-              <span className="text-xs text-muted-foreground block -mt-1">Zombie reverse</span>
+              <span className="font-heading text-xl font-bold uppercase tracking-wider text-white">ShadowZM</span>
+              <span className="text-xs text-muted-foreground block -mt-1">Zombie Reverse</span>
             </div>
           </Link>
 
