@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -18,6 +18,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     if (token) {
@@ -32,11 +34,48 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await axios.get(`${API}/auth/me`);
       setUser(response.data);
+      // Fetch notifications for this user
+      if (response.data.steamid || response.data.nickname) {
+        fetchNotifications(response.data.steamid, response.data.nickname);
+      }
     } catch (error) {
       console.error('Failed to fetch user', error);
       logout();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNotifications = useCallback(async (steamid, nickname) => {
+    try {
+      const params = new URLSearchParams();
+      if (steamid) params.append('steamid', steamid);
+      if (nickname) params.append('nickname', nickname);
+      
+      const response = await axios.get(`${API}/notifications?${params.toString()}`);
+      setNotifications(response.data);
+      setUnreadCount(response.data.filter(n => !n.read).length);
+    } catch (error) {
+      console.error('Failed to fetch notifications', error);
+    }
+  }, []);
+
+  const markNotificationRead = async (notifId) => {
+    try {
+      await axios.patch(`${API}/notifications/${notifId}/read`);
+      setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Failed to mark notification read', error);
+    }
+  };
+
+  const deleteNotification = async (notifId) => {
+    try {
+      await axios.delete(`${API}/notifications/${notifId}`);
+      setNotifications(prev => prev.filter(n => n.id !== notifId));
+    } catch (error) {
+      console.error('Failed to delete notification', error);
     }
   };
 
@@ -47,6 +86,9 @@ export const AuthProvider = ({ children }) => {
     axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
     setToken(access_token);
     setUser(userData);
+    if (userData.steamid || userData.nickname) {
+      fetchNotifications(userData.steamid, userData.nickname);
+    }
     return userData;
   };
 
@@ -75,9 +117,17 @@ export const AuthProvider = ({ children }) => {
     delete axios.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
+    setNotifications([]);
+    setUnreadCount(0);
   };
 
   const isAdmin = user?.role === 'admin';
+
+  const refreshNotifications = () => {
+    if (user?.steamid || user?.nickname) {
+      fetchNotifications(user.steamid, user.nickname);
+    }
+  };
 
   return (
     <AuthContext.Provider value={{
@@ -89,7 +139,12 @@ export const AuthProvider = ({ children }) => {
       register,
       logout,
       isAdmin,
-      isAuthenticated: !!user
+      isAuthenticated: !!user,
+      notifications,
+      unreadCount,
+      markNotificationRead,
+      deleteNotification,
+      refreshNotifications
     }}>
       {children}
     </AuthContext.Provider>

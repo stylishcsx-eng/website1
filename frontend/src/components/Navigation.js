@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Menu, X, Shield, Server, Users, Ban, FileText, UserPlus, LogIn, LogOut, Home, Crosshair } from 'lucide-react';
+import { Menu, X, Shield, Server, Users, Ban, FileText, UserPlus, LogIn, LogOut, Home, Crosshair, Bell, Check, Trash2 } from 'lucide-react';
 
 export const Navigation = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const location = useLocation();
-  const { user, logout, isAdmin, isAuthenticated } = useAuth();
+  const { user, logout, isAdmin, isAuthenticated, notifications, unreadCount, markNotificationRead, deleteNotification } = useAuth();
 
   const navLinks = [
     { path: '/', label: 'HOME', icon: Home },
@@ -18,6 +19,12 @@ export const Navigation = () => {
   ];
 
   const isActive = (path) => location.pathname === path;
+
+  const getNotificationColor = (type) => {
+    if (type?.includes('approved')) return 'border-green-500 bg-green-500/10';
+    if (type?.includes('rejected')) return 'border-red-500 bg-red-500/10';
+    return 'border-yellow-500 bg-yellow-500/10';
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-b border-white/5">
@@ -52,10 +59,72 @@ export const Navigation = () => {
             ))}
           </div>
 
-          {/* Auth Buttons */}
+          {/* Auth Buttons & Notifications */}
           <div className="hidden md:flex items-center space-x-3">
             {isAuthenticated ? (
               <>
+                {/* Notifications Bell */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    data-testid="btn-notifications"
+                    className="relative p-2 text-muted-foreground hover:text-white transition-colors"
+                  >
+                    <Bell className="w-5 h-5" />
+                    {unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-white text-xs flex items-center justify-center rounded-full">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Notifications Dropdown */}
+                  {showNotifications && (
+                    <div className="absolute right-0 top-full mt-2 w-80 bg-card border border-white/10 shadow-xl z-50">
+                      <div className="p-3 border-b border-white/10">
+                        <h3 className="font-heading text-sm uppercase tracking-widest text-white">Notifications</h3>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <div className="p-4 text-center text-muted-foreground text-sm">
+                            No notifications
+                          </div>
+                        ) : (
+                          notifications.map((notif) => (
+                            <div
+                              key={notif.id}
+                              className={`p-3 border-l-2 ${getNotificationColor(notif.type)} ${!notif.read ? 'bg-white/5' : ''}`}
+                            >
+                              <p className="text-sm text-foreground mb-1">{notif.message}</p>
+                              <div className="flex items-center justify-between mt-2">
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(notif.created_at).toLocaleDateString()}
+                                </span>
+                                <div className="flex space-x-2">
+                                  {!notif.read && (
+                                    <button
+                                      onClick={() => markNotificationRead(notif.id)}
+                                      className="text-green-500 hover:text-green-400"
+                                    >
+                                      <Check className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => deleteNotification(notif.id)}
+                                    className="text-red-500 hover:text-red-400"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {isAdmin && (
                   <Link
                     to="/admin"
@@ -129,6 +198,17 @@ export const Navigation = () => {
               <div className="border-t border-white/5 pt-4 mt-2">
                 {isAuthenticated ? (
                   <>
+                    {/* Mobile Notifications */}
+                    {notifications.length > 0 && (
+                      <div className="px-4 py-2 mb-2">
+                        <p className="text-xs text-muted-foreground uppercase mb-2">Notifications ({unreadCount})</p>
+                        {notifications.slice(0, 3).map((notif) => (
+                          <div key={notif.id} className={`p-2 mb-1 border-l-2 ${getNotificationColor(notif.type)} text-xs`}>
+                            {notif.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {isAdmin && (
                       <Link
                         to="/admin"

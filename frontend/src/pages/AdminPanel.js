@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Users, Ban, FileText, Check, X, Trash2, Shield, RefreshCw } from 'lucide-react';
+import { Users, Ban, FileText, Check, X, Trash2, Shield, RefreshCw, Database, Calendar, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -13,9 +13,12 @@ export const AdminPanel = () => {
   const [users, setUsers] = useState([]);
   const [bans, setBans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [amxbansStatus, setAmxbansStatus] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchData();
+    checkAmxbansStatus();
   }, [activeTab]);
 
   const fetchData = async () => {
@@ -39,13 +42,59 @@ export const AdminPanel = () => {
     }
   };
 
+  const checkAmxbansStatus = async () => {
+    try {
+      const response = await axios.get(`${API}/bans/amxbans-status`);
+      setAmxbansStatus(response.data);
+    } catch (error) {
+      setAmxbansStatus({ connected: false, error: 'Failed to check status' });
+    }
+  };
+
+  const syncAmxbans = async () => {
+    setSyncing(true);
+    try {
+      await axios.post(`${API}/bans/sync-amxbans`);
+      toast.success('AMXBans synced successfully!');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to sync AMXBans');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleApplicationStatus = async (appId, status) => {
     try {
       await axios.patch(`${API}/admin-applications/${appId}`, { status });
-      toast.success(`Application ${status}`);
+      toast.success(`Application ${status}! Player will be notified.`);
       fetchData();
     } catch (error) {
       toast.error('Failed to update application');
+    }
+  };
+
+  const handleDeleteApplication = async (appId) => {
+    if (!window.confirm('Are you sure you want to delete this application?')) return;
+    
+    try {
+      await axios.delete(`${API}/admin-applications/${appId}`);
+      toast.success('Application deleted');
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to delete application');
+    }
+  };
+
+  const handleDeleteOldApplications = async () => {
+    if (!window.confirm('Delete all applications older than 30 days?')) return;
+    
+    try {
+      const response = await axios.delete(`${API}/admin-applications/bulk/old`);
+      toast.success(response.data.message);
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to delete old applications');
     }
   };
 
@@ -82,6 +131,30 @@ export const AdminPanel = () => {
           >
             <RefreshCw className="w-4 h-4" />
             <span className="font-heading uppercase text-sm tracking-widest hidden sm:inline">Refresh</span>
+          </button>
+        </div>
+
+        {/* AMXBans Status Card */}
+        <div className="mb-6 p-4 bg-card/50 border border-white/10 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Database className={`w-6 h-6 ${amxbansStatus?.connected ? 'text-green-500' : 'text-red-500'}`} />
+            <div>
+              <p className="font-heading text-sm uppercase tracking-widest text-white">AMXBans Database</p>
+              <p className="text-xs text-muted-foreground">
+                {amxbansStatus?.connected 
+                  ? `Connected to ${amxbansStatus.host}/${amxbansStatus.database}` 
+                  : amxbansStatus?.error || 'Not connected'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={syncAmxbans}
+            disabled={syncing || !amxbansStatus?.connected}
+            data-testid="btn-sync-amxbans"
+            className="flex items-center space-x-2 px-4 py-2 bg-primary/20 border border-primary text-primary hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            <span className="font-heading uppercase text-sm tracking-widest">Sync Bans</span>
           </button>
         </div>
 
@@ -135,6 +208,18 @@ export const AdminPanel = () => {
             {/* Applications Tab */}
             {activeTab === 'applications' && (
               <div className="space-y-4">
+                {/* Bulk Actions */}
+                <div className="flex justify-end mb-4">
+                  <button
+                    onClick={handleDeleteOldApplications}
+                    data-testid="btn-delete-old-apps"
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-900/20 border border-red-500/50 text-red-500 hover:bg-red-900/40 transition-colors"
+                  >
+                    <Calendar className="w-4 h-4" />
+                    <span className="font-heading uppercase text-sm">Delete 30+ Days Old</span>
+                  </button>
+                </div>
+
                 {applications.length === 0 ? (
                   <div className="text-center py-16 bg-card/50 border border-white/10">
                     <FileText className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
@@ -152,13 +237,22 @@ export const AdminPanel = () => {
                           <h3 className="font-heading text-xl font-bold text-white">{app.nickname}</h3>
                           <p className="font-mono text-xs text-muted-foreground mt-1">{app.steamid}</p>
                         </div>
-                        <span className={`px-3 py-1 text-xs font-heading uppercase tracking-wider ${
-                          app.status === 'pending' ? 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/50' :
-                          app.status === 'approved' ? 'bg-green-900/30 text-green-500 border border-green-500/50' :
-                          'bg-red-900/30 text-red-500 border border-red-500/50'
-                        }`}>
-                          {app.status}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-3 py-1 text-xs font-heading uppercase tracking-wider ${
+                            app.status === 'pending' ? 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/50' :
+                            app.status === 'approved' ? 'bg-green-900/30 text-green-500 border border-green-500/50' :
+                            'bg-red-900/30 text-red-500 border border-red-500/50'
+                          }`}>
+                            {app.status}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteApplication(app.id)}
+                            data-testid="btn-delete-application"
+                            className="text-red-500 hover:text-red-400 hover:bg-red-900/20 p-2 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
@@ -260,6 +354,7 @@ export const AdminPanel = () => {
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">SteamID</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Reason</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Duration</th>
+                        <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Source</th>
                         <th className="px-6 py-4 text-left font-heading text-xs text-muted-foreground uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
@@ -270,6 +365,14 @@ export const AdminPanel = () => {
                           <td className="px-6 py-4 font-mono text-xs text-primary">{ban.steamid}</td>
                           <td className="px-6 py-4 text-sm text-foreground">{ban.reason}</td>
                           <td className="px-6 py-4 font-mono text-sm text-muted-foreground">{ban.duration}</td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2 py-1 text-xs font-heading uppercase ${
+                              ban.source === 'amxbans' ? 'bg-blue-900/20 text-blue-500 border border-blue-500/50' :
+                              'bg-muted text-muted-foreground'
+                            }`}>
+                              {ban.source || 'manual'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4">
                             <button
                               onClick={() => handleDeleteBan(ban.id)}
