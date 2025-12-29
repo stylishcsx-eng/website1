@@ -43,6 +43,9 @@ AMXBANS_DB = os.environ.get('AMXBANS_DB', 'amx')
 AMXBANS_USER = os.environ.get('AMXBANS_USER', 'root')
 AMXBANS_PASS = os.environ.get('AMXBANS_PASS', '')
 
+# Webhook secret for ban sync
+BAN_WEBHOOK_SECRET = os.environ.get('BAN_WEBHOOK_SECRET', 'shadowzm-ban-secret-2024')
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
