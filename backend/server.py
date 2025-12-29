@@ -212,15 +212,6 @@ async def init_default_admin():
         }
         await db.users.insert_one(owner_user)
         logging.info("Default owner created: Stylish")
-            "nickname": "Stylish",
-            "email": "admin@shadowzm.com",
-            "password": hash_password("Itachi1849"),
-            "steamid": "STEAM_0:0:000000",
-            "role": "admin",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(admin_user)
-        logging.info("Default admin created: Stylish")
 
 # ==================== SERVER STATUS ====================
 
