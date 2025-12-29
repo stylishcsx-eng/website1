@@ -14,7 +14,6 @@ import jwt
 from passlib.context import CryptContext
 import a2s
 import asyncio
-import aiomysql
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -35,13 +34,6 @@ security = HTTPBearer(auto_error=False)
 CS_SERVER_IP = "82.22.174.126"
 CS_SERVER_PORT = 27016
 CS_SERVER_NAME = "shadowzm: Zombie reverse"
-
-# AMXBans MySQL Config (set via environment or defaults)
-AMXBANS_HOST = os.environ.get('AMXBANS_HOST', '82.22.174.126')
-AMXBANS_PORT = int(os.environ.get('AMXBANS_PORT', '3306'))
-AMXBANS_DB = os.environ.get('AMXBANS_DB', 'amx')
-AMXBANS_USER = os.environ.get('AMXBANS_USER', 'root')
-AMXBANS_PASS = os.environ.get('AMXBANS_PASS', '')
 
 # Webhook secret for ban sync
 BAN_WEBHOOK_SECRET = os.environ.get('BAN_WEBHOOK_SECRET', 'shadowzm-ban-secret-2024')
@@ -95,6 +87,12 @@ class BanResponse(BaseModel):
     admin_name: str
     duration: str
     ban_date: str
+
+class BanUpdate(BaseModel):
+    player_nickname: Optional[str] = None
+    steamid: Optional[str] = None
+    reason: Optional[str] = None
+    duration: Optional[str] = None
 
 class AdminApplicationCreate(BaseModel):
     nickname: str
@@ -154,6 +152,12 @@ class DashboardStats(BaseModel):
     online_players: int
     pending_applications: int
 
+class CreateAdminUser(BaseModel):
+    nickname: str
+    email: EmailStr
+    password: str
+    steamid: Optional[str] = None
+
 # ==================== AUTH HELPERS ====================
 
 def hash_password(password: str) -> str:
@@ -196,7 +200,7 @@ async def require_owner(user = Depends(require_auth)):
         raise HTTPException(status_code=403, detail="Owner access required")
     return user
 
-# ==================== INIT DEFAULT ADMIN ====================
+# ==================== INIT DEFAULT OWNER ====================
 
 async def init_default_admin():
     owner = await db.users.find_one({"role": "owner"})
@@ -349,12 +353,6 @@ async def delete_ban(ban_id: str, user = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Ban not found")
     return {"message": "Ban removed"}
 
-class BanUpdate(BaseModel):
-    player_nickname: Optional[str] = None
-    steamid: Optional[str] = None
-    reason: Optional[str] = None
-    duration: Optional[str] = None
-
 @api_router.patch("/bans/{ban_id}")
 async def update_ban(ban_id: str, data: BanUpdate, user = Depends(require_admin)):
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
@@ -371,65 +369,50 @@ async def update_ban(ban_id: str, data: BanUpdate, user = Depends(require_admin)
     result.pop("_id", None)
     return result
 
-@api_router.delete("/bans/clear/demo")
-async def clear_demo_bans(user = Depends(require_admin)):
-    """Clear all demo bans"""
+@api_router.delete("/bans/clear/all")
+async def clear_all_bans(user = Depends(require_admin)):
     result = await db.bans.delete_many({})
     return {"message": f"Cleared {result.deleted_count} bans"}
 
-# ==================== OWNER: ADMIN USER MANAGEMENT ====================
+# ==================== BAN WEBHOOK ====================
 
-class CreateAdminUser(BaseModel):
-    nickname: str
-    email: EmailStr
-    password: str
-    steamid: Optional[str] = None
+class BanWebhookData(BaseModel):
+    secret: str
+    player_nickname: str
+    steamid: str
+    reason: str
+    admin_name: str
+    duration: str
 
-@api_router.post("/owner/create-admin")
-async def create_admin_user(data: CreateAdminUser, user = Depends(require_owner)):
-    """Owner can create new admin users"""
-    existing = await db.users.find_one({"$or": [{"email": data.email}, {"nickname": data.nickname}]})
+@api_router.post("/bans/webhook")
+async def receive_ban_webhook(data: BanWebhookData):
+    if data.secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    
+    existing = await db.bans.find_one({"steamid": data.steamid, "reason": data.reason})
     if existing:
-        raise HTTPException(status_code=400, detail="User with this email or nickname already exists")
+        return {"message": "Ban already exists", "id": existing["id"]}
     
-    new_admin = {
+    ban = {
         "id": str(uuid.uuid4()),
-        "nickname": data.nickname,
-        "email": data.email,
-        "password": hash_password(data.password),
+        "player_nickname": data.player_nickname,
         "steamid": data.steamid,
-        "role": "admin",
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "ip": "Hidden",
+        "reason": data.reason,
+        "admin_name": data.admin_name,
+        "duration": data.duration,
+        "ban_date": datetime.now(timezone.utc).isoformat(),
+        "source": "server"
     }
-    await db.users.insert_one(new_admin)
-    return {"message": f"Admin user '{data.nickname}' created successfully"}
+    await db.bans.insert_one(ban)
+    return {"message": "Ban added", "id": ban["id"]}
 
-@api_router.delete("/owner/delete-admin/{user_id}")
-async def delete_admin_user(user_id: str, user = Depends(require_owner)):
-    """Owner can delete admin users"""
-    target_user = await db.users.find_one({"id": user_id})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if target_user.get("role") == "owner":
-        raise HTTPException(status_code=403, detail="Cannot delete owner account")
-    
-    await db.users.delete_one({"id": user_id})
-    return {"message": "Admin user deleted"}
-
-@api_router.patch("/owner/update-role/{user_id}")
-async def update_user_role(user_id: str, role: str, user = Depends(require_owner)):
-    """Owner can change user roles"""
-    if role not in ["player", "admin"]:
-        raise HTTPException(status_code=400, detail="Invalid role. Use 'player' or 'admin'")
-    
-    target_user = await db.users.find_one({"id": user_id})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if target_user.get("role") == "owner":
-        raise HTTPException(status_code=403, detail="Cannot change owner role")
-    
-    await db.users.update_one({"id": user_id}, {"$set": {"role": role}})
-    return {"message": f"User role updated to {role}"}
+@api_router.delete("/bans/webhook/{steamid}")
+async def remove_ban_webhook(steamid: str, secret: str):
+    if secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    result = await db.bans.delete_many({"steamid": steamid})
+    return {"message": f"Removed {result.deleted_count} ban(s)"}
 
 # ==================== PLAYERS / RANKINGS ROUTES ====================
 
@@ -458,6 +441,51 @@ async def get_top_players(limit: int = 15):
         p["rank"] = i + 1
     return players
 
+# ==================== PLAYER STATS WEBHOOK ====================
+
+class PlayerStatsWebhookData(BaseModel):
+    secret: str
+    nickname: str
+    steamid: str
+    kills: int
+    deaths: int
+    headshots: int = 0
+
+@api_router.post("/players/webhook")
+async def receive_player_stats_webhook(data: PlayerStatsWebhookData):
+    if data.secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    
+    kd_ratio = round(data.kills / max(data.deaths, 1), 2)
+    level = min(50, data.kills // 500)
+    
+    existing = await db.players.find_one({"steamid": data.steamid})
+    
+    player_data = {
+        "nickname": data.nickname,
+        "steamid": data.steamid,
+        "kills": data.kills,
+        "deaths": data.deaths,
+        "headshots": data.headshots,
+        "kd_ratio": kd_ratio,
+        "level": level,
+        "last_seen": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if existing:
+        await db.players.update_one({"steamid": data.steamid}, {"$set": player_data})
+        return {"message": "Player updated", "steamid": data.steamid}
+    else:
+        player_data["id"] = str(uuid.uuid4())
+        player_data["rank"] = 0
+        await db.players.insert_one(player_data)
+        return {"message": "Player added", "steamid": data.steamid}
+
+@api_router.delete("/players/clear/all")
+async def clear_all_players(user = Depends(require_admin)):
+    result = await db.players.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} players"}
+
 # ==================== ADMIN APPLICATIONS ROUTES ====================
 
 @api_router.get("/admin-applications", response_model=List[AdminApplicationResponse])
@@ -467,14 +495,13 @@ async def get_admin_applications(user = Depends(require_admin)):
 
 @api_router.post("/admin-applications", response_model=AdminApplicationResponse)
 async def create_admin_application(data: AdminApplicationCreate):
-    # Check if user has applied in the last 30 days
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     recent_app = await db.admin_applications.find_one({
         "steamid": data.steamid,
         "submitted_at": {"$gte": thirty_days_ago}
     })
     if recent_app:
-        raise HTTPException(status_code=400, detail="You can only apply once per month. Please wait before reapplying.")
+        raise HTTPException(status_code=400, detail="You can only apply once per month.")
     
     app = {
         "id": str(uuid.uuid4()),
@@ -498,12 +525,11 @@ async def update_admin_application(app_id: str, data: AdminApplicationUpdate, us
     )
     result.pop("_id", None)
     
-    # Create notification for the applicant
     notification = {
         "id": str(uuid.uuid4()),
         "steamid": application["steamid"],
         "nickname": application["nickname"],
-        "message": f"Your admin application has been {data.status}!" if data.status in ["approved", "rejected"] else f"Application status: {data.status}",
+        "message": f"Your admin application has been {data.status}!",
         "type": "application_" + data.status,
         "read": False,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -521,11 +547,8 @@ async def delete_admin_application(app_id: str, user = Depends(require_admin)):
 
 @api_router.delete("/admin-applications/bulk/old")
 async def delete_old_applications(user = Depends(require_admin)):
-    """Delete all applications older than 30 days"""
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    result = await db.admin_applications.delete_many({
-        "submitted_at": {"$lt": thirty_days_ago}
-    })
+    result = await db.admin_applications.delete_many({"submitted_at": {"$lt": thirty_days_ago}})
     return {"message": f"Deleted {result.deleted_count} old applications"}
 
 # ==================== NOTIFICATIONS ====================
@@ -550,176 +573,50 @@ async def delete_notification(notif_id: str):
     await db.notifications.delete_one({"id": notif_id})
     return {"message": "Notification deleted"}
 
-# ==================== PLAYER STATS WEBHOOK (Live Rankings) ====================
+# ==================== OWNER: ADMIN USER MANAGEMENT ====================
 
-class PlayerStatsWebhookData(BaseModel):
-    secret: str
-    nickname: str
-    steamid: str
-    kills: int
-    deaths: int
-    headshots: int = 0
-
-@api_router.post("/players/webhook")
-async def receive_player_stats_webhook(data: PlayerStatsWebhookData):
-    """Receive player stats from game server webhook"""
-    if data.secret != BAN_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
-    
-    kd_ratio = round(data.kills / max(data.deaths, 1), 2)
-    level = min(50, data.kills // 500)  # Level based on kills
-    
-    # Update or insert player
-    existing = await db.players.find_one({"steamid": data.steamid})
-    
-    player_data = {
-        "nickname": data.nickname,
-        "steamid": data.steamid,
-        "kills": data.kills,
-        "deaths": data.deaths,
-        "headshots": data.headshots,
-        "kd_ratio": kd_ratio,
-        "level": level,
-        "last_seen": datetime.now(timezone.utc).isoformat()
-    }
-    
+@api_router.post("/owner/create-admin")
+async def create_admin_user(data: CreateAdminUser, user = Depends(require_owner)):
+    existing = await db.users.find_one({"$or": [{"email": data.email}, {"nickname": data.nickname}]})
     if existing:
-        await db.players.update_one(
-            {"steamid": data.steamid},
-            {"$set": player_data}
-        )
-        return {"message": "Player updated", "steamid": data.steamid}
-    else:
-        player_data["id"] = str(uuid.uuid4())
-        player_data["rank"] = 0  # Will be calculated
-        await db.players.insert_one(player_data)
-        return {"message": "Player added", "steamid": data.steamid}
-
-@api_router.delete("/players/clear/demo")
-async def clear_demo_players(user = Depends(require_admin)):
-    """Clear all demo players"""
-    result = await db.players.delete_many({})
-    return {"message": f"Cleared {result.deleted_count} players"}
-
-# ==================== BAN WEBHOOK (Simple Solution) ====================
-
-class BanWebhookData(BaseModel):
-    secret: str
-    player_nickname: str
-    steamid: str
-    reason: str
-    admin_name: str
-    duration: str  # e.g., "Permanent", "30 days", "7 days"
-
-@api_router.post("/bans/webhook")
-async def receive_ban_webhook(data: BanWebhookData):
-    """Receive ban from game server webhook - no IP stored"""
-    if data.secret != BAN_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
+        raise HTTPException(status_code=400, detail="User with this email or nickname already exists")
     
-    # Check if ban already exists
-    existing = await db.bans.find_one({"steamid": data.steamid, "reason": data.reason})
-    if existing:
-        return {"message": "Ban already exists", "id": existing["id"]}
-    
-    ban = {
+    new_admin = {
         "id": str(uuid.uuid4()),
-        "player_nickname": data.player_nickname,
+        "nickname": data.nickname,
+        "email": data.email,
+        "password": hash_password(data.password),
         "steamid": data.steamid,
-        "ip": "Hidden",  # Don't store IP
-        "reason": data.reason,
-        "admin_name": data.admin_name,
-        "duration": data.duration,
-        "ban_date": datetime.now(timezone.utc).isoformat(),
-        "source": "server"
+        "role": "admin",
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
-    await db.bans.insert_one(ban)
-    return {"message": "Ban added", "id": ban["id"]}
+    await db.users.insert_one(new_admin)
+    return {"message": f"Admin user '{data.nickname}' created successfully"}
 
-@api_router.delete("/bans/webhook/{steamid}")
-async def remove_ban_webhook(steamid: str, secret: str):
-    """Remove ban via webhook (for unbans)"""
-    if secret != BAN_WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
+@api_router.delete("/owner/delete-admin/{user_id}")
+async def delete_admin_user(user_id: str, user = Depends(require_owner)):
+    target_user = await db.users.find_one({"id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.get("role") == "owner":
+        raise HTTPException(status_code=403, detail="Cannot delete owner account")
     
-    result = await db.bans.delete_many({"steamid": steamid})
-    return {"message": f"Removed {result.deleted_count} ban(s)"}
+    await db.users.delete_one({"id": user_id})
+    return {"message": "User deleted"}
 
-# ==================== AMXBANS LIVE SYNC ====================
-
-async def fetch_amxbans():
-    """Fetch bans from AMXBans MySQL database"""
-    try:
-        conn = await aiomysql.connect(
-            host=AMXBANS_HOST,
-            port=AMXBANS_PORT,
-            user=AMXBANS_USER,
-            password=AMXBANS_PASS,
-            db=AMXBANS_DB
-        )
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("""
-                SELECT player_nick, player_id, player_ip, ban_reason, admin_nick, ban_length, ban_created 
-                FROM amx_bans 
-                WHERE expired = 0 OR ban_length = 0
-                ORDER BY ban_created DESC
-                LIMIT 100
-            """)
-            bans = await cur.fetchall()
-        conn.close()
-        return bans
-    except Exception as e:
-        logging.warning(f"Failed to fetch AMXBans: {e}")
-        return None
-
-async def sync_amxbans_to_db():
-    """Sync AMXBans to local MongoDB"""
-    amx_bans = await fetch_amxbans()
-    if amx_bans is None:
-        return False
+@api_router.patch("/owner/update-role/{user_id}")
+async def update_user_role(user_id: str, role: str, user = Depends(require_owner)):
+    if role not in ["player", "admin"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
     
-    for ban in amx_bans:
-        existing = await db.bans.find_one({"steamid": ban.get("player_id", ""), "source": "amxbans"})
-        if not existing:
-            duration = "Permanent" if ban.get("ban_length", 0) == 0 else f"{ban.get('ban_length', 0)} min"
-            new_ban = {
-                "id": str(uuid.uuid4()),
-                "player_nickname": ban.get("player_nick", "Unknown"),
-                "steamid": ban.get("player_id", ""),
-                "ip": ban.get("player_ip", ""),
-                "reason": ban.get("ban_reason", "No reason"),
-                "admin_name": ban.get("admin_nick", "Server"),
-                "duration": duration,
-                "ban_date": datetime.fromtimestamp(ban.get("ban_created", 0), tz=timezone.utc).isoformat() if ban.get("ban_created") else datetime.now(timezone.utc).isoformat(),
-                "source": "amxbans"
-            }
-            await db.bans.insert_one(new_ban)
-    return True
-
-@api_router.post("/bans/sync-amxbans")
-async def sync_amxbans(user = Depends(require_admin)):
-    """Manually sync bans from AMXBans database"""
-    success = await sync_amxbans_to_db()
-    if success:
-        return {"message": "AMXBans synced successfully"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to connect to AMXBans database. Check MySQL credentials.")
-
-@api_router.get("/bans/amxbans-status")
-async def check_amxbans_status():
-    """Check if AMXBans connection is working"""
-    try:
-        conn = await aiomysql.connect(
-            host=AMXBANS_HOST,
-            port=AMXBANS_PORT,
-            user=AMXBANS_USER,
-            password=AMXBANS_PASS,
-            db=AMXBANS_DB
-        )
-        conn.close()
-        return {"connected": True, "host": AMXBANS_HOST, "database": AMXBANS_DB}
-    except Exception as e:
-        return {"connected": False, "error": str(e)}
+    target_user = await db.users.find_one({"id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.get("role") == "owner":
+        raise HTTPException(status_code=403, detail="Cannot change owner role")
+    
+    await db.users.update_one({"id": user_id}, {"$set": {"role": role}})
+    return {"message": f"User role updated to {role}"}
 
 # ==================== ADMIN ROUTES ====================
 
@@ -727,43 +624,6 @@ async def check_amxbans_status():
 async def get_all_users(user = Depends(require_admin)):
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
     return users
-
-# ==================== SEED DATA ====================
-
-async def seed_demo_data():
-    # Seed some demo players
-    players_count = await db.players.count_documents({})
-    if players_count == 0:
-        demo_players = [
-            {"id": str(uuid.uuid4()), "nickname": "HeadshotKing", "steamid": "STEAM_0:1:12345678", "kills": 15420, "deaths": 4521, "headshots": 8920, "level": 45, "rank": 1, "kd_ratio": 3.41, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "NightProwler", "steamid": "STEAM_0:0:23456789", "kills": 12890, "deaths": 5120, "headshots": 6540, "level": 42, "rank": 2, "kd_ratio": 2.52, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "ShadowStriker", "steamid": "STEAM_0:1:34567890", "kills": 11200, "deaths": 4890, "headshots": 5890, "level": 40, "rank": 3, "kd_ratio": 2.29, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "BulletStorm", "steamid": "STEAM_0:0:45678901", "kills": 9870, "deaths": 4230, "headshots": 4560, "level": 38, "rank": 4, "kd_ratio": 2.33, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "FragMaster", "steamid": "STEAM_0:1:56789012", "kills": 8540, "deaths": 3980, "headshots": 4120, "level": 35, "rank": 5, "kd_ratio": 2.15, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "ColdBlood", "steamid": "STEAM_0:0:67890123", "kills": 7650, "deaths": 3560, "headshots": 3890, "level": 33, "rank": 6, "kd_ratio": 2.15, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "QuickScope", "steamid": "STEAM_0:1:78901234", "kills": 6890, "deaths": 3210, "headshots": 3450, "level": 31, "rank": 7, "kd_ratio": 2.15, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "TacticalAce", "steamid": "STEAM_0:0:89012345", "kills": 6120, "deaths": 2980, "headshots": 3120, "level": 29, "rank": 8, "kd_ratio": 2.05, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "DeathDealer", "steamid": "STEAM_0:1:90123456", "kills": 5430, "deaths": 2760, "headshots": 2780, "level": 27, "rank": 9, "kd_ratio": 1.97, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "StealthHunter", "steamid": "STEAM_0:0:01234567", "kills": 4890, "deaths": 2540, "headshots": 2450, "level": 25, "rank": 10, "kd_ratio": 1.93, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "IronSight", "steamid": "STEAM_0:1:11223344", "kills": 4320, "deaths": 2310, "headshots": 2180, "level": 23, "rank": 11, "kd_ratio": 1.87, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "ViperStrike", "steamid": "STEAM_0:0:22334455", "kills": 3780, "deaths": 2050, "headshots": 1920, "level": 21, "rank": 12, "kd_ratio": 1.84, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "GhostWalker", "steamid": "STEAM_0:1:33445566", "kills": 3210, "deaths": 1780, "headshots": 1650, "level": 19, "rank": 13, "kd_ratio": 1.80, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "RapidFire", "steamid": "STEAM_0:0:44556677", "kills": 2650, "deaths": 1520, "headshots": 1380, "level": 17, "rank": 14, "kd_ratio": 1.74, "last_seen": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "nickname": "SilentKill", "steamid": "STEAM_0:1:55667788", "kills": 2120, "deaths": 1250, "headshots": 1100, "level": 15, "rank": 15, "kd_ratio": 1.70, "last_seen": datetime.now(timezone.utc).isoformat()},
-        ]
-        await db.players.insert_many(demo_players)
-        logging.info("Demo players seeded")
-    
-    # Seed some demo bans
-    bans_count = await db.bans.count_documents({})
-    if bans_count == 0:
-        demo_bans = [
-            {"id": str(uuid.uuid4()), "player_nickname": "CheatMaster", "steamid": "STEAM_0:0:99999999", "ip": "192.168.1.100", "reason": "Aimbot detected", "admin_name": "Stylish", "duration": "Permanent", "ban_date": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "player_nickname": "WallHacker", "steamid": "STEAM_0:1:88888888", "ip": "10.0.0.50", "reason": "Wallhack usage", "admin_name": "Stylish", "duration": "30 days", "ban_date": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "player_nickname": "ToxicPlayer", "steamid": "STEAM_0:0:77777777", "ip": "172.16.0.25", "reason": "Toxic behavior and harassment", "admin_name": "Stylish", "duration": "7 days", "ban_date": datetime.now(timezone.utc).isoformat()},
-        ]
-        await db.bans.insert_many(demo_bans)
-        logging.info("Demo bans seeded")
 
 # ==================== ROOT ====================
 
@@ -777,7 +637,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -791,7 +651,6 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup():
     await init_default_admin()
-    # Demo data seeding removed - only real data from your server
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
