@@ -109,18 +109,6 @@ export const Login = () => {
             </p>
           </div>
         </form>
-
-        {/* Admin Login Link */}
-        <div className="mt-6 text-center">
-          <Link
-            to="/admin-login"
-            data-testid="link-admin-login"
-            className="inline-flex items-center space-x-2 text-muted-foreground hover:text-primary text-sm transition-colors"
-          >
-            <Shield className="w-4 h-4" />
-            <span>Admin Login</span>
-          </Link>
-        </div>
       </div>
     </div>
   );
