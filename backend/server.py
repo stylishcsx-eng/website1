@@ -346,6 +346,12 @@ async def create_ban(data: BanCreate, user = Depends(require_admin)):
     await db.bans.insert_one(ban)
     return ban
 
+# Clear routes MUST be before parameterized routes
+@api_router.delete("/bans/clear/all")
+async def clear_all_bans(user = Depends(require_admin)):
+    result = await db.bans.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} bans"}
+
 @api_router.delete("/bans/{ban_id}")
 async def delete_ban(ban_id: str, user = Depends(require_admin)):
     result = await db.bans.delete_one({"id": ban_id})
@@ -368,11 +374,6 @@ async def update_ban(ban_id: str, data: BanUpdate, user = Depends(require_admin)
         raise HTTPException(status_code=404, detail="Ban not found")
     result.pop("_id", None)
     return result
-
-@api_router.delete("/bans/clear/all")
-async def clear_all_bans(user = Depends(require_admin)):
-    result = await db.bans.delete_many({})
-    return {"message": f"Cleared {result.deleted_count} bans"}
 
 # ==================== BAN WEBHOOK ====================
 
