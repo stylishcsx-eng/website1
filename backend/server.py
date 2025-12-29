@@ -360,6 +360,7 @@ async def delete_ban(ban_id: str, user = Depends(require_admin)):
     return {"message": "Ban removed"}
 
 @api_router.patch("/bans/{ban_id}")
+@api_router.put("/bans/{ban_id}")
 async def update_ban(ban_id: str, data: BanUpdate, user = Depends(require_admin)):
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_data:
