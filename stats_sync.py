@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 CSStats Parser & Sync for shadowzm
-Reads csstats.dat and syncs player stats to website
+Parses csstats.dat and syncs player stats to website
 
 Usage: python3 /home/stats_sync.py
 """
-
 import struct
 import requests
 import os
@@ -16,16 +15,8 @@ SECRET = "shadowzm-ban-secret-2024"
 CSSTATS_FILE = "/var/lib/pterodactyl/volumes/d968fb39-3234-47f5-9341-d3149d0c8739/cstrike/addons/amxmodx/data/csstats.dat"
 # =======================================
 
-def read_string(data, offset):
-    """Read null-terminated string from binary data"""
-    end = data.find(b'\x00', offset)
-    if end == -1:
-        return "", offset
-    string = data[offset:end].decode('utf-8', errors='ignore')
-    return string, end + 1
-
 def parse_csstats(filepath):
-    """Parse csstats.dat binary file"""
+    """Parse csstats.dat binary file (AMX Mod X format)"""
     players = []
     
     try:
@@ -35,61 +26,100 @@ def parse_csstats(filepath):
         print(f"Error: File not found: {filepath}")
         return []
     
-    if len(data) < 4:
-        print("Error: File too small")
+    if len(data) < 10:
+        print(f"Error: File too small ({len(data)} bytes)")
         return []
     
-    offset = 0
+    print(f"File size: {len(data)} bytes")
     
-    # Try to parse the file
-    # CSStats format varies by version, trying common format
-    while offset < len(data) - 50:
+    offset = 0
+    player_count = 0
+    
+    # CSStats format:
+    # - 2 bytes: version/header
+    # - For each player:
+    #   - 2 bytes: name length
+    #   - name (null-terminated string)
+    #   - 2 bytes: steamid length  
+    #   - steamid (null-terminated string)
+    #   - Stats: 7 integers (28 bytes) or 8 integers (32 bytes)
+    #     tks, damage, deaths, kills, shots, hits, hs [, rounds]
+    
+    # Read header
+    if len(data) >= 2:
+        header = struct.unpack('<H', data[0:2])[0]
+        print(f"Header/Version: {header}")
+        offset = 2
+    
+    while offset < len(data) - 10:
         try:
-            # Read player name
-            name, offset = read_string(data, offset)
-            if not name or len(name) < 1:
-                offset += 1
-                continue
+            # Read name length
+            if offset + 2 > len(data):
+                break
+            name_len = struct.unpack('<H', data[offset:offset+2])[0]
+            offset += 2
             
-            # Read steamid/uniqueid
-            steamid, offset = read_string(data, offset)
-            if not steamid:
-                continue
+            if name_len == 0 or name_len > 64:
+                break
             
-            # Skip if not a valid steamid format
-            if not steamid.startswith("STEAM_") and not steamid.startswith("VALVE_"):
-                # Might be IP-based, try to continue
-                if "." not in steamid and len(steamid) < 5:
-                    continue
+            # Read name
+            if offset + name_len > len(data):
+                break
+            name = data[offset:offset+name_len].rstrip(b'\x00').decode('utf-8', errors='ignore')
+            offset += name_len
             
-            # Read stats (typically 7 integers: tks, damage, deaths, kills, shots, hits, hs)
-            if offset + 28 > len(data):
+            # Read steamid length
+            if offset + 2 > len(data):
+                break
+            steamid_len = struct.unpack('<H', data[offset:offset+2])[0]
+            offset += 2
+            
+            if steamid_len == 0 or steamid_len > 64:
                 break
                 
-            stats = struct.unpack('<7i', data[offset:offset+28])
-            offset += 28
+            # Read steamid
+            if offset + steamid_len > len(data):
+                break
+            steamid = data[offset:offset+steamid_len].rstrip(b'\x00').decode('utf-8', errors='ignore')
+            offset += steamid_len
+            
+            # Read stats (7 integers = 28 bytes)
+            # tks, damage, deaths, kills, shots, hits, headshots
+            if offset + 28 > len(data):
+                # Try reading what we can
+                remaining = len(data) - offset
+                stats = [0] * 7
+                if remaining >= 4:
+                    num_ints = remaining // 4
+                    for i in range(min(num_ints, 7)):
+                        stats[i] = struct.unpack('<i', data[offset+i*4:offset+i*4+4])[0]
+                offset = len(data)
+            else:
+                stats = list(struct.unpack('<7i', data[offset:offset+28]))
+                offset += 28
             
             tks, damage, deaths, kills, shots, hits, headshots = stats
             
             # Skip invalid entries
-            if kills < 0 or deaths < 0 or kills > 1000000:
+            if kills < 0 or deaths < 0:
                 continue
             
-            # Skip players with no activity
-            if kills == 0 and deaths == 0:
-                continue
+            player_count += 1
+            print(f"  Found: {name} ({steamid}) - K:{kills} D:{deaths} HS:{headshots}")
             
             players.append({
                 'nickname': name,
                 'steamid': steamid,
-                'kills': kills,
-                'deaths': deaths,
-                'headshots': headshots
+                'kills': max(0, kills),
+                'deaths': max(0, deaths),
+                'headshots': max(0, headshots)
             })
             
         except Exception as e:
-            offset += 1
-            continue
+            print(f"  Parse error at offset {offset}: {e}")
+            break
+    
+    print(f"\nTotal players found: {player_count}")
     
     # Sort by kills
     players.sort(key=lambda x: x['kills'], reverse=True)
@@ -115,37 +145,60 @@ def sync_to_website(players):
                 timeout=10
             )
             if response.status_code == 200:
-                print(f"✓ {player['nickname']}: {player['kills']} kills")
+                print(f"✓ Synced: {player['nickname']}")
                 synced += 1
             else:
-                print(f"✗ {player['nickname']}: HTTP {response.status_code}")
+                print(f"✗ Failed: {player['nickname']} - HTTP {response.status_code}")
                 failed += 1
         except Exception as e:
-            print(f"✗ {player['nickname']}: {e}")
+            print(f"✗ Error: {player['nickname']} - {e}")
             failed += 1
     
     return synced, failed
 
 def main():
-    print("=== CSStats Sync ===")
-    print(f"Reading: {CSSTATS_FILE}")
+    print("=" * 50)
+    print("CSStats Sync Tool for shadowzm")
+    print("=" * 50)
+    print(f"\nReading: {CSSTATS_FILE}")
+    
+    if not os.path.exists(CSSTATS_FILE):
+        print(f"\nError: Stats file not found!")
+        print("Make sure the path is correct.")
+        return
     
     players = parse_csstats(CSSTATS_FILE)
     
     if not players:
-        print("No players found in stats file.")
-        print("\nAlternative: Add players manually with:")
-        print(f'curl -X POST "{WEBSITE_URL}/api/players/webhook" -H "Content-Type: application/json" -d \'{{"secret":"{SECRET}","nickname":"PlayerName","steamid":"STEAM_0:1:123","kills":100,"deaths":50,"headshots":30}}\'')
+        print("\nNo players with stats found.")
+        print("\nTo add players manually, use this command:")
+        print(f'''
+curl -X POST "{WEBSITE_URL}/api/players/webhook" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"secret":"{SECRET}","nickname":"PlayerName","steamid":"STEAM_0:1:123456","kills":100,"deaths":50,"headshots":30}}'
+''')
         return
     
-    print(f"Found {len(players)} players")
-    print("\nSyncing to website...")
+    # Only sync players with actual activity
+    active_players = [p for p in players if p['kills'] > 0 or p['deaths'] > 0]
     
-    synced, failed = sync_to_website(players)
+    if not active_players:
+        print("\nPlayers found but all have 0 kills/deaths.")
+        print("Stats will populate as players play on the server.")
+        
+        # Still sync them so they appear
+        print("\nSyncing players anyway...")
+        synced, failed = sync_to_website(players)
+    else:
+        print(f"\n{len(active_players)} players with stats to sync")
+        print("\nSyncing to website...")
+        synced, failed = sync_to_website(active_players)
     
-    print(f"\n=== Complete ===")
-    print(f"Synced: {synced}")
-    print(f"Failed: {failed}")
+    print(f"\n{'=' * 50}")
+    print(f"Sync Complete!")
+    print(f"  Synced: {synced}")
+    print(f"  Failed: {failed}")
+    print(f"{'=' * 50}")
 
 if __name__ == "__main__":
     main()
