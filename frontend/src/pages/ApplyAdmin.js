@@ -53,7 +53,7 @@ export const ApplyAdmin = () => {
             APPLICATION SUBMITTED
           </h1>
           <p className="text-muted-foreground mb-8">
-            Thank you for applying to become an admin on shadowzm: Zombie reverse! 
+            Thank you for applying to become an admin on ShadowZM : Zombie Reverse! 
             Your application will be reviewed by our admin team. You will be notified about the status.
           </p>
           <button
@@ -79,7 +79,7 @@ export const ApplyAdmin = () => {
               APPLY FOR ADMIN
             </h1>
           </div>
-          <p className="text-muted-foreground">Join our admin team and help maintain fair gameplay on shadowzm: Zombie reverse</p>
+          <p className="text-muted-foreground">Join our admin team and help maintain fair gameplay on ShadowZM : Zombie Reverse</p>
         </div>
 
         {/* Requirements */}

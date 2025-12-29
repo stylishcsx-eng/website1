@@ -228,7 +228,7 @@ export const Home = () => {
       <footer className="border-t border-white/5 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="text-muted-foreground text-sm font-mono">
-            &copy; 2024 shadowzm: Zombie reverse. All rights reserved.
+            &copy; 2024 ShadowZM : Zombie Reverse. All rights reserved.
           </p>
         </div>
       </footer>

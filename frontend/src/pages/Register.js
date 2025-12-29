@@ -53,7 +53,7 @@ export const Register = () => {
           <h1 className="font-heading text-3xl font-bold uppercase tracking-tight text-white mb-2" data-testid="page-title">
             REGISTER
           </h1>
-          <p className="text-muted-foreground text-sm">Create your shadowzm account</p>
+          <p className="text-muted-foreground text-sm">Create your ShadowZM account</p>
         </div>
 
         {/* Register Form */}

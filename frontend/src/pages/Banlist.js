@@ -104,7 +104,7 @@ export const Banlist = () => {
               BANLIST
             </h1>
           </div>
-          <p className="text-muted-foreground">Players banned from shadowzm: Zombie reverse</p>
+          <p className="text-muted-foreground">Players banned from ShadowZM : Zombie Reverse</p>
           <p className="text-xs text-muted-foreground mt-1">Auto-refreshes every 30 seconds</p>
         </div>
 

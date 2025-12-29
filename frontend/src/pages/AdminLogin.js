@@ -50,7 +50,7 @@ export const AdminLogin = () => {
           <h1 className="font-heading text-3xl font-bold uppercase tracking-tight text-white mb-2" data-testid="page-title">
             ADMIN ACCESS
           </h1>
-          <p className="text-muted-foreground text-sm">shadowzm: Zombie reverse Control Panel</p>
+          <p className="text-muted-foreground text-sm">ShadowZM : Zombie Reverse Control Panel</p>
         </div>
 
         {/* Login Form */}

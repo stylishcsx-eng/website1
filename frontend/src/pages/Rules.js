@@ -65,7 +65,7 @@ export const Rules = () => {
             SERVER RULES
           </h1>
           <p className="text-muted-foreground max-w-2xl mx-auto">
-            These rules are designed to ensure fair play and an enjoyable experience for all players on shadowzm: Zombie reverse. 
+            These rules are designed to ensure fair play and an enjoyable experience for all players on ShadowZM : Zombie Reverse. 
             Violating these rules may result in temporary or permanent bans.
           </p>
         </div>

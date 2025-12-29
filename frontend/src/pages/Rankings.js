@@ -49,7 +49,7 @@ export const Rankings = () => {
           <h1 className="font-heading text-4xl md:text-5xl font-bold uppercase tracking-tight text-white mb-2" data-testid="page-title">
             TOP 15 RANKINGS
           </h1>
-          <p className="text-muted-foreground">The elite warriors of shadowzm: Zombie reverse</p>
+          <p className="text-muted-foreground">The elite warriors of ShadowZM : Zombie Reverse</p>
         </div>
 
         {/* Search */}

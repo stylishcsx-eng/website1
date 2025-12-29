@@ -41,7 +41,7 @@ export const Login = () => {
           <h1 className="font-heading text-3xl font-bold uppercase tracking-tight text-white mb-2" data-testid="page-title">
             PLAYER LOGIN
           </h1>
-          <p className="text-muted-foreground text-sm">Access your shadowzm account</p>
+          <p className="text-muted-foreground text-sm">Access your ShadowZM account</p>
         </div>
 
         {/* Login Form */}
