@@ -469,6 +469,57 @@ async def delete_notification(notif_id: str):
     await db.notifications.delete_one({"id": notif_id})
     return {"message": "Notification deleted"}
 
+# ==================== PLAYER STATS WEBHOOK (Live Rankings) ====================
+
+class PlayerStatsWebhookData(BaseModel):
+    secret: str
+    nickname: str
+    steamid: str
+    kills: int
+    deaths: int
+    headshots: int = 0
+
+@api_router.post("/players/webhook")
+async def receive_player_stats_webhook(data: PlayerStatsWebhookData):
+    """Receive player stats from game server webhook"""
+    if data.secret != BAN_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+    
+    kd_ratio = round(data.kills / max(data.deaths, 1), 2)
+    level = min(50, data.kills // 500)  # Level based on kills
+    
+    # Update or insert player
+    existing = await db.players.find_one({"steamid": data.steamid})
+    
+    player_data = {
+        "nickname": data.nickname,
+        "steamid": data.steamid,
+        "kills": data.kills,
+        "deaths": data.deaths,
+        "headshots": data.headshots,
+        "kd_ratio": kd_ratio,
+        "level": level,
+        "last_seen": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if existing:
+        await db.players.update_one(
+            {"steamid": data.steamid},
+            {"$set": player_data}
+        )
+        return {"message": "Player updated", "steamid": data.steamid}
+    else:
+        player_data["id"] = str(uuid.uuid4())
+        player_data["rank"] = 0  # Will be calculated
+        await db.players.insert_one(player_data)
+        return {"message": "Player added", "steamid": data.steamid}
+
+@api_router.delete("/players/clear/demo")
+async def clear_demo_players(user = Depends(require_admin)):
+    """Clear all demo players"""
+    result = await db.players.delete_many({})
+    return {"message": f"Cleared {result.deleted_count} players"}
+
 # ==================== BAN WEBHOOK (Simple Solution) ====================
 
 class BanWebhookData(BaseModel):
